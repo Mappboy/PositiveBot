@@ -1,6 +1,8 @@
 from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
 
+from chalicelib.util import one_week_ago_iso
+
 
 class DynamoDBTeam(object):
     def __init__(self, table_resource):
@@ -67,6 +69,16 @@ class DynamoDBSubscription(object):
             return response.get('Item')
 
     def list_subscriptions(self, category=None, feed=None, is_image=None, is_gif=None, is_video=None, latest=None):
+        """
+        Consider using ProjectionExpression to fetch only ids and fetch a single item after random id
+        :param category:
+        :param feed:
+        :param is_image:
+        :param is_gif:
+        :param is_video:
+        :param latest:
+        :return:
+        """
         scan_params = {}
         filter_expression = None
         if category is not None:
@@ -83,11 +95,15 @@ class DynamoDBSubscription(object):
             )
         if is_gif is not None:
             filter_expression = self._add_to_filter_expression(
-                filter_expression, Attr('IsImage').eq(is_gif)
+                filter_expression, Attr('IsGif').eq(is_gif)
             )
         if is_video is not None:
             filter_expression = self._add_to_filter_expression(
                 filter_expression, Attr('ISVideo').eq(is_video)
+            )
+        if latest:
+            filter_expression = self._add_to_filter_expression(
+                filter_expression, Attr('CreatedDate').gte(one_week_ago_iso())
             )
         if filter_expression:
             scan_params['FilterExpression'] = filter_expression

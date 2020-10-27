@@ -1,16 +1,20 @@
 """
 Positive Bot Slack Code
 TODO:
-    - Get news working
+    - We should use message queues so we can send acknowledge reciepts to Slack and not get timeouts
     - Add feedback button to remove from db
     - Validate token see https://api.slack.com/interactivity/slash-commands
+    - Add submit type
+    - Add quotes
+    - Add update subreddits function
+    - Add GetMotivated sub
 """
 import os
 from random import choice
 from urllib.parse import parse_qs
 
 import boto3
-from chalice import Chalice
+from chalice import Chalice, Rate
 from slack import WebClient
 from slack.errors import SlackApiError
 
@@ -18,12 +22,6 @@ from chalicelib import db
 from chalicelib.util import image_slack_block, news_slack_block
 
 app = Chalice(app_name='PositiveBot')
-app.debug = True
-affirmations = []
-affirm_file = os.path.join(
-    os.path.dirname(__file__), 'chalicelib', 'affirmations.txt')
-with open(affirm_file, "r") as affirm_file:
-    affirmations += [_.rstrip("\n") for _ in affirm_file.readlines()]
 
 slack_signing_secret = os.environ["SLACK_SIGNING_SECRET"]
 # Create a SlackClient for your bot to use for Web API requests
@@ -65,6 +63,11 @@ def get_team_queue():
     return _QUEUE
 
 
+@app.schedule(Rate(4, unit=Rate.MINUTES))
+def keep_warm(event):
+    print(event.to_dict())
+
+
 @app.route('/')
 def index():
     return {"message": "hello"}
@@ -72,18 +75,26 @@ def index():
 
 @app.route('/news', methods=["GET", "POST"],
            content_types=['application/x-www-form-urlencoded'])
-def news():
+def get_news():
     """
     Takes in latest or random from text
     :return:
     """
     parsed = parse_qs(app.current_request.raw_body.decode())
+    print(parsed)
     latest_news = parsed.get("text") == "latest"
-    news = get_subscriptions_db().list_subscriptions(category='news', latest=latest_news)
+    if latest_news:
+        news = get_subscriptions_db().list_subscriptions(category='news', latest=latest_news)
+        # Drop latest
+        if not news:
+            news = get_subscriptions_db().list_subscriptions(category='news')
+    else:
+        news = get_subscriptions_db().list_subscriptions(category='news')
     if not news:
         return {"response_type": "ephemeral",
                 "text": "Oops I broke"}
     slack_block = news_slack_block(choice(news))
+    print(slack_block)
     return slack_block
 
 
@@ -141,11 +152,19 @@ def events():
         event_type = event.get("type", None) if isinstance(event, dict) else None
         message = event.get("text", None) if isinstance(event, dict) else None
         if event_type and event_type == "message" and message and message.lower() == "positive":
+            # Todo this should be it's own function
+            # Only load affirmations if we need them
+            affirmations = []
+            affirm_file = os.path.join(
+                os.path.dirname(__file__), 'chalicelib', 'affirmations.txt')
+            with open(affirm_file, "r") as affirm_file:
+                affirmations += [_.rstrip("\n") for _ in affirm_file.readlines()]
+
             channel = event.get("channel", None)
             channel_type = event.get("channel_type", None)
             user = event.get("user", None)
             text = choice(affirmations)
-            print(channel_type)
+            # refactor this to remove repeated code
             if channel and channel_type != "im":
                 try:
                     print(f"Channel = {channel}")

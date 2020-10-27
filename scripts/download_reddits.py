@@ -32,7 +32,8 @@ image_subs = (
     'humansbeingbros',
     'animalsbeingbros',
     'mademesmile',
-    'happycowgifs'
+    'happycowgifs',
+    'getmotivated'
 )
 news_subs = (
     'upliftingnews',
@@ -111,7 +112,7 @@ def sub_to_item(submission: Submission, sub_type: str, feed: str) -> dict:
             "Domain": submission.domain,
             "Permalink": submission.permalink,
             "Subreddit": str(submission.subreddit),
-            "CreatedDate": datetime.datetime.utcfromtimestamp(submission.created).strftime('%m-%d-%Y'),
+            "CreatedDate": datetime.datetime.utcfromtimestamp(submission.created).strftime('%Y-%m-%d'),
             "Category": sub_type,
             "Feed": feed,
             "IsImage": True if url_image else False,
