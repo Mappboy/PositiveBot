@@ -66,7 +66,7 @@ class DynamoDBSubscription(object):
         else:
             return response.get('Item')
 
-    def list_subscriptions(self, category=None, feed=None, is_image=None, is_gif=None, is_video=None):
+    def list_subscriptions(self, category=None, feed=None, is_image=None, is_gif=None, is_video=None, latest=None):
         scan_params = {}
         filter_expression = None
         if category is not None:

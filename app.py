@@ -1,3 +1,10 @@
+"""
+Positive Bot Slack Code
+TODO:
+    - Get news working
+    - Add feedback button to remove from db
+    - Validate token see https://api.slack.com/interactivity/slash-commands
+"""
 import os
 from random import choice
 from urllib.parse import parse_qs
@@ -8,7 +15,7 @@ from slack import WebClient
 from slack.errors import SlackApiError
 
 from chalicelib import db
-from chalicelib.util import image_slack_block
+from chalicelib.util import image_slack_block, news_slack_block
 
 app = Chalice(app_name='PositiveBot')
 app.debug = True
@@ -70,19 +77,23 @@ def news():
     Takes in latest or random from text
     :return:
     """
-    get_subscriptions_db().list_subscriptions(category='news')
-    return {"message": "hello"}
+    parsed = parse_qs(app.current_request.raw_body.decode())
+    latest_news = parsed.get("text") == "latest"
+    news = get_subscriptions_db().list_subscriptions(category='news', latest=latest_news)
+    if not news:
+        return {"response_type": "ephemeral",
+                "text": "Oops I broke"}
+    slack_block = news_slack_block(choice(news))
+    return slack_block
 
 
 @app.route('/images', methods=["GET", "POST"],
            content_types=['application/x-www-form-urlencoded'])
 def get_images():
-    print("Received slack message")
-    parsed = parse_qs(app.current_request.raw_body.decode())
-    print(app.current_request.to_dict())
     images = get_subscriptions_db().list_subscriptions(category='images', is_image=True)
     if not images:
-        return {"message": "Oops I broke"}
+        return {"response_type": "ephemeral",
+                "text": "Oops I broke"}
     slack_block = image_slack_block(choice(images))
     print(slack_block)
     return slack_block
@@ -93,7 +104,8 @@ def get_images():
 def get_gifs():
     gifs = get_subscriptions_db().list_subscriptions(category='images', is_gif=True)
     if not gifs:
-        return {"message": "Oops I broke"}
+        return {"response_type": "ephemeral",
+                "text": "Oops I broke"}
     return image_slack_block(choice(gifs))
 
 
@@ -101,7 +113,8 @@ def get_gifs():
 def get_videos():
     videos = get_subscriptions_db().list_subscriptions(category='images', is_video=True)
     if not videos:
-        return {"message": "Oops I broke"}
+        return {"response_type": "ephemeral",
+                "text": "Oops I broke"}
     return image_slack_block(choice(videos))
 
 
