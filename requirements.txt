@@ -1,3 +1,4 @@
 slackclient
 chalice
+boto3
 praw
