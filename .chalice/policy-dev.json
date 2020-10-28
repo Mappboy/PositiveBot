@@ -1,0 +1,57 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:*:*:*",
+      "Effect": "Allow"
+    },
+    {
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:GetItem",
+        "dynamodb:Scan",
+        "dynamodb:Query"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/team-app-*",
+        "arn:aws:dynamodb:*:*:table/subscriptions-app-*"
+      ],
+      "Effect": "Allow"
+    },
+        {
+      "Action": [
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl",
+        "sqs:ListDeadLetterSourceQueues",
+        "sqs:ListQueueTags",
+        "sqs:ListQueues",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:SendMessage",
+        "sqs:SendMessageBatch",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": [
+        "arn:aws:sqs:*:*:positive-subscriptions-*",
+        "arn:aws:sqs:*:*:positive-events-*"
+      ],
+      "Effect": "Allow"
+    },
+    {
+      "Action": [
+        "ssm:GetParameter"
+      ],
+      "Resource": [
+	"arn:aws:ssm:*:*:parameter/positive-app/auth-key"
+      ],
+      "Effect": "Allow"
+    }
+  ]
+}

@@ -26,7 +26,6 @@ reddit = praw.Reddit(client_id=client_id,
                      username=username)
 
 image_subs = (
-    'wholesomememes',
     'eyebleach',
     'wholesomegifs',
     'humansbeingbros',

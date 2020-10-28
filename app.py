@@ -9,12 +9,16 @@ TODO:
     - Add update subreddits function
     - Add GetMotivated sub
 """
+import json
+import logging
 import os
 from random import choice
 from urllib.parse import parse_qs
 
 import boto3
-from chalice import Chalice, Rate
+import requests
+from chalice import Chalice
+from chalice.app import SQSEvent, Response
 from slack import WebClient
 from slack.errors import SlackApiError
 
@@ -22,6 +26,7 @@ from chalicelib import db
 from chalicelib.util import image_slack_block, news_slack_block
 
 app = Chalice(app_name='PositiveBot')
+app.log.setLevel(logging.INFO)
 
 slack_signing_secret = os.environ["SLACK_SIGNING_SECRET"]
 # Create a SlackClient for your bot to use for Web API requests
@@ -32,7 +37,8 @@ client_secret = os.environ["SLACK_CLIENT_SECRET"]
 
 _TEAM_DB = None
 _SUB_DB = None
-_QUEUE = None
+_SUBS_QUEUE = None
+_EVENTS_QUEUE = None
 
 
 def get_team_db():
@@ -55,17 +61,22 @@ def get_subscriptions_db():
     return _SUB_DB
 
 
-def get_team_queue():
-    global _QUEUE
-    if _QUEUE is None:
-        sqs = boto3.resource('sqs')
-        _QUEUE = sqs.get_queue_by_name(QueueName='team')
-    return _QUEUE
+def get_events_queue(sqs=None):
+    global _EVENTS_QUEUE
+    if _EVENTS_QUEUE is None:
+        if sqs is None:
+            sqs = boto3.resource('sqs')
+        _QUEUE = sqs.get_queue_by_name(QueueName=os.environ['EVENTS_QUEUE_NAME'])
+    return _EVENTS_QUEUE
 
 
-@app.schedule(Rate(4, unit=Rate.MINUTES))
-def keep_warm(event):
-    print(event.to_dict())
+def get_subscriptions_queue(sqs=None):
+    global _SUBS_QUEUE
+    if _SUBS_QUEUE is None:
+        if sqs is None:
+            sqs = boto3.resource('sqs')
+        _SUBS_QUEUE = sqs.get_queue_by_name(QueueName=os.environ['SUBSCRIPTIONS_QUEUE_NAME'])
+    return _SUBS_QUEUE
 
 
 @app.route('/')
@@ -73,16 +84,20 @@ def index():
     return {"message": "hello"}
 
 
-@app.route('/news', methods=["GET", "POST"],
-           content_types=['application/x-www-form-urlencoded'])
-def get_news():
-    """
-    Takes in latest or random from text
-    :return:
-    """
-    parsed = parse_qs(app.current_request.raw_body.decode())
-    print(parsed)
-    latest_news = parsed.get("text") == "latest"
+@app.on_sqs_message(queue=os.environ['SUBSCRIPTIONS_QUEUE_NAME'])
+def subscriptions_handler(event: SQSEvent):
+    for message in event:
+        app.log.info("Message: %s", message.to_dict())
+        message_body = json.loads(message.body)
+        app.log.info(message_body.get("command"))
+        handle_news(message_body)
+
+    app.log.info("Event: %s", event.to_dict())
+
+
+def handle_news(message: dict):
+    app.log.info("Handling news message")
+    latest_news = message.get("text") == "latest"
     if latest_news:
         news = get_subscriptions_db().list_subscriptions(category='news', latest=latest_news)
         # Drop latest
@@ -94,8 +109,37 @@ def get_news():
         return {"response_type": "ephemeral",
                 "text": "Oops I broke"}
     slack_block = news_slack_block(choice(news))
-    print(slack_block)
-    return slack_block
+    app.log.info(slack_block)
+    response_url = message.get("response_url")[0]
+    try:
+        resp = requests.post(url=response_url, json=slack_block)
+        if not resp.ok:
+            app.log.error(f"Failed to post message {response_url} {slack_block} ")
+        else:
+            app.log.info(f"Sent message {response_url} {slack_block} ")
+    except Exception as e:
+        app.log.error(f"Unexpected error {e}")
+
+
+@app.route('/news', methods=["GET", "POST"],
+           content_types=['application/x-www-form-urlencoded'])
+def get_news():
+    """
+    Takes in latest or random from text
+    :return:
+    """
+    try:
+        parsed = parse_qs(app.current_request.raw_body.decode())
+        response = get_subscriptions_queue().send_message(
+            MessageBody=json.dumps(parsed))
+        if response:
+            app.log.info("Message sent to queue: %s" % response)
+            return Response(body='',
+                            status_code=200,
+                            headers={'Content-Type': 'text/plain'})
+    except Exception as e:
+        app.log.error(e)
+        return {"text": "Something has gone wrong with the service"}
 
 
 @app.route('/images', methods=["GET", "POST"],
@@ -106,7 +150,7 @@ def get_images():
         return {"response_type": "ephemeral",
                 "text": "Oops I broke"}
     slack_block = image_slack_block(choice(images))
-    print(slack_block)
+    app.log.info(slack_block)
     return slack_block
 
 
@@ -147,7 +191,7 @@ def events():
         team_access_token = get_team_db().get_team(team_id).get("access_token")
         # Fallback
         client = WebClient(team_access_token) if team_access_token else WebClient(slack_bot_token)
-        print(app.current_request.json_body)
+        app.log.info(app.current_request.json_body)
         event = app.current_request.json_body.get("event", {})
         event_type = event.get("type", None) if isinstance(event, dict) else None
         message = event.get("text", None) if isinstance(event, dict) else None
@@ -167,7 +211,7 @@ def events():
             # refactor this to remove repeated code
             if channel and channel_type != "im":
                 try:
-                    print(f"Channel = {channel}")
+                    app.log.info(f"Channel = {channel}")
                     response = client.chat_postMessage(
                         channel=channel,
                         text=text)
@@ -179,12 +223,12 @@ def events():
                             text=text)
                         return {'message': text, "status": "ok"}
                     else:
-                        print(f"Unknown error {e.response['error']}")
+                        app.log.info(f"Unknown error {e.response['error']}")
                         return {'message': text, "status": "ok"}
             else:
                 try:
                     resp = client.conversations_open(user=user)
-                    print(f"resp = {resp}")
+                    app.log.info(f"resp = {resp}")
                     response = client.chat_postMessage(
                         channel=resp.get("channel"),
                         text=text)
@@ -196,7 +240,7 @@ def events():
                             text=text)
                         return {'message': text, "status": "ok"}
                     else:
-                        print(f"Unknown error {e.response['error']}")
+                        app.log.info(f"Unknown error {e.response['error']}")
                 return {'message': text, "status": "ok"}
         return {"message": "Nothing to respond", "status": "ok"}
 
@@ -224,7 +268,7 @@ def post_install():
     team_name = team.get("name")
     access_token = response.get("access_token")
     if not all([team_id, team_name, access_token]):
-        print(response)
+        app.log.info(response)
         return {"Missing value in response": response}
     if get_team_db().get_team(team_id):
         get_team_db().update_team(team_id, team_name, access_token)

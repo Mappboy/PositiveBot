@@ -21,13 +21,22 @@ TABLES = {
     }
 }
 
-#TODO add nice sqs queue
+# TODO add nice sqs queue
 QUEUES = {
-    'messages': {
+    'events': {
+        'prefix': 'positive-events',
+        'env_var': 'EVENTS_QUEUE_NAME',
         'attributes': {
             'channel_id': str,
             'user_id': str,
             'message': str
+        }
+    },
+    'subscriptions': {
+        'prefix': 'positive-subscriptions',
+        'env_var': 'SUBSCRIPTIONS_QUEUE_NAME',
+        'attributes': {
+            'text': str
         }
     }
 }
@@ -64,6 +73,18 @@ def create_table(table_name_prefix, hash_key, range_key=None):
     waiter = client.get_waiter('table_exists')
     waiter.wait(TableName=table_name, WaiterConfig={'Delay': 1})
     return table_name
+
+
+def create_queue(queue_name_prefix):
+    queue_name = '%s-%s' % (queue_name_prefix, str(uuid.uuid4()))
+    client = boto3.client('sqs')
+    client.create_queue(
+        QueueName=queue_name,
+        Attributes={
+            'VisibilityTimeout': 60
+        }
+    )
+    return queue_name
 
 
 def record_as_env_var(key, value, stage):
@@ -108,6 +129,14 @@ def create_resources(args):
             table_config.get('range_key')
         )
         record_as_env_var(table_config['env_var'], table_name, args.stage)
+    for queue_config in QUEUES.values():
+        if _already_in_config(queue_config['env_var'], args.stage):
+            continue
+        print(f"Creating queue: {queue_config['prefix']}")
+        queue_name = create_queue(
+            queue_config['prefix']
+        )
+        record_as_env_var(queue_config['env_var'], queue_name, args.stage)
     create_auth_key_if_needed(args.stage)
 
 
